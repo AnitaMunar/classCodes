@@ -1,0 +1,47 @@
+library(tidyverse)
+library(class)
+library(ggplot2)
+library(caret)
+
+url <- "https://raw.githubusercontent.com/businessdatasolutions/courses/main/data%20mining/gitbook/datasets/breastcancer.csv"
+rawDF <- read_csv(url)
+str(rawDF)
+cleanDF <- rawDF[-1]
+head(cleanDF)
+cntDiag <- table(cleanDF$diagnosis)
+cleanDF <- rawDF[-1]
+head(cleanDF)
+cntDiag <- table(cleanDF$diagnosis)
+propDiag <- round(prop.table(cntDiag) * 100 , digits = 1)
+cntDiag
+propDiag
+
+cleanDF$diagnosis <- factor(cleanDF$diagnosis, levels = c("B", "M"), labels = c("Benign", "Malignant")) %>% relevel("Malignant")
+head(cleanDF, 10)
+
+summary(cleanDF[c("radius_mean", "area_mean", "smoothness_mean")])
+summary(cleanDF[c("radius_mean", "area_mean", "smoothness_mean")])
+
+cat("testSet1:", testSet1, "\n")
+cat("testSet2:", testSet2, "\n")
+cat("Normalized testSet1:", normalize(testSet1), "\n")
+cat("Normalized testSet2:", normalize(testSet2))
+
+nCols <- dim(cleanDF)[1]
+cleanDF_n <- sapply(2:nCols,
+                    function(x) {
+                      normalize(cleanDF[,x])
+                    }) %>% as.data.frame()
+summary(cleanDF_n[c("radius_mean", "area_mean", "smoothness_mean")])
+
+trainDF_feat <- cleanDF_n[1:469,  ]
+testDF_feat <- cleanDF_n[470:569,  ]
+trainDF_labels <- cleanDF[1:469,  1]
+testDF_labels <- cleanDF[470:569,  1]
+
+cleanDF_test_pred <- knn(train = as.matrix(trainDF_feat), test = as.matrix(testDF_feat), cl = as.matrix(trainDF_labels), k = 21)
+
+head(cleanDF_testpred)
+
+confusionMatrix(cleanDF_testpred, testDF_labels[[1]], positive = NULL, dnn = c("Prediction", "True"))
+
