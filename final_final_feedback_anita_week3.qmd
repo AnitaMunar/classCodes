@@ -1,0 +1,197 @@
+---
+title: "finalfeedbackweek3anita"
+format: html
+editor: visual
+---
+
+## Feedback from Anita
+
+Here, I will review the code shared with me by Linh Vo, created in order to predict breast cancer from patient data with the help of a confusion matrix model.
+
+Linh's code:
+
+```{2){r}
+library(tidyverse)
+library(googlesheets4)
+library(class)
+library(caret)
+library(creditmodel)
+library(cvms)
+library(ggplot2)
+```
+
+Starting out with packages, these choices are crucial to carry out statistical analyses. Creditmodel and cvms had a harder time loading onto my computer, but eventually managed to do so. Additionally, ggplot2 is to be added to the code here.
+
+Linh's code:
+
+```{r}
+rawDF <- read_csv("./datasets/KNN-diabetes.csv")
+```
+
+This way of calling the csv file into R does not work for me yet. As the error message reads, the file is not in my currect working directory. My go-to opening method of csv files is the following.
+
+Anita's feedback code:
+
+```{r}
+url <- "https://raw.githubusercontent.com/businessdatasolutions/courses/main/data%20mining/gitbook/datasets/breastcancer.csv"
+rawDF <- read_csv(url)
+```
+
+```{r}
+str(rawDF)
+summary(rawDF)
+```
+
+After correctly checking the dataset, we see that we must clean the first column. In class, we learned the "cleanDF \<- rawDF\[-1\]" solution. On the other hand, Linh applied another method in order to check for duplicated data.
+
+Linh' code:
+
+```{r}
+dup_check <- sum(duplicated(rawDF))
+dup_check
+```
+
+We see that no data is duplicated, meaning that the data was imported successfully. Based on my trial, cleaning the first column is essential in order for the code to run. On the other hand, Linh used a different approach.
+
+Next, contrary to the solution provided in class, the variable "Outcome" was analyzed instead of "Diagnosis".
+
+Linh's code:
+
+rawDF\$Outcome \<- factor(rawDF\$Outcome, levels = c(0, 1), labels = c("Negative", "Positive")) %\>% relevel("Positive")
+
+```{r}
+rawDF$Outcome <- factor(rawDF$Outcome, levels = c(0, 1), labels = c("Negative", "Positive")) %>%  relevel("Positive")
+```
+
+As seen above, this gives us an error. Below is the code containing the variable that contains the "outcome" of the diagnosis, called "diagnosis", after the column seen in cleanDF. Knowing that the cleanDF variable is not introduced yet, I did not load in the correct code from class, but instead tried to proceed with her new code, fixing the word "outcome" to "diagnosis".
+
+```{r}
+rawDF$diagnosis <- factor(rawDF$diagnosis, levels = c(0, 1), labels = c("Negative", "Positive")) %>%  relevel("Positive")
+```
+
+```{r}
+normalize <- function(x) {
+  return ((x - min(x)) / (max(x) - min(x)))
+}
+cleanDF <- rawDF 
+```
+
+The change of words in referring to the variable helped, and the error message does not pop up anymore.
+
+```{r}
+cleanDF[,1:8] <- normalize(cleanDF[,1:(ncol(rawDF)-1)])
+summary(cleanDF)
+```
+
+Here can be seen the attempt to remove the first column, which we solved differently in class, as mentioned earlier. Sadly, this gives me the error message saying:
+
+    Error in FUN(X[[i]], ...) : 
+      only defined on a data frame with all numeric-alike variables
+
+After attempting to go further with the code, it seems to be not working anymore. This error should be fixed in order to proceed.
+
+Linh's code:
+
+```{r}
+test <- train_test_split(cleanDF)[[1]]
+train <- train_test_split(cleanDF)[[2]]
+```
+
+```{r}
+test_feat <- test[-9]
+train_feat <- train[-9]
+```
+
+```{r}
+test_labels <- test[, 9]
+train_labels <- train[,9]
+```
+
+As seen above, she excluded the diagnosis variable (which she referred to as "outcome", and split the data into training and test sets using the "creditmodel" package.
+
+Next, the modelling part, using the knn function from the "class" package. Here are some new functions that I am not yet familiar with.
+
+Linh's code:
+
+```{r}
+error_k <- function(k) {
+  error_rate <- data.frame()
+  for (i in k) {
+    knn <- knn(train = as.matrix(train_feat), test = as.matrix(test_feat), cl = as.matrix(train_labels), k = i)
+    knn <- relevel(knn, "Positive")
+    matrix <- confusionMatrix(knn, test_labels[[1]], positive = NULL, dnn = c("Prediction", "True"))
+    error_rate <- rbind(error_rate, 1-matrix$overall[["Accuracy"]])
+  }
+  error_k <- data.frame(k, error_rate)
+  colnames(error_k) <- c("k", "error_rate")
+  error_k
+}
+```
+
+This code seems to be replacing what we seen in class as:
+
+```{#Do not run this!}
+
+cleanDF_test_pred <- knn(train = as.matrix(trainDF_feat), test = as.matrix(testDF_feat), cl = as.matrix(trainDF_labels), k = 21)
+head(cleanDF_test_pred)
+```
+
+After doing this, she can plot the error rate with k.
+
+Linh's code:
+
+```{r}
+plot <- error_k(1:40)
+```
+
+Sadly, the code does not run for me,from here on. I clicked on "plots" but the pane is empty. The error is the following:
+
+    Browse[1]> plot <- error_k(1:40)
+    Error during wrapup: no missing values are allowed
+    Error: no more error handlers available (recursive errors?); invoking 'abort' restart
+
+```{r}
+ggplot(plot, aes(x = k, y = error_rate )) +
+  geom_point(colour = "red", size = 3, alpha = 0.5) +
+  geom_line(colour = "blue", size = 0.7, linetype = 2) +
+  labs(title = "Error Rate vs k value") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  ylab("Error Rate")
+```
+
+    Error during wrapup: `data` cannot be a function.
+    ℹ Have you misspelled the `data` argument in `ggplot()`
+
+```{r}
+cleanDF_test_pred <- knn(train = as.matrix(train_feat), test = as.matrix(test_feat), cl = as.matrix(train_labels), k = 11)
+cleanDF_test_pred <- relevel(cleanDF_test_pred, "Positive")
+head(cleanDF_test_pred)
+```
+
+    Error during wrapup: no missing values are allowed
+    Error: no more error handlers available (recursive errors?); invoking 'abort' restart
+    Browse[1]> cleanDF_test_pred <- relevel(cleanDF_test_pred, "Positive")
+    Error during wrapup: object 'cleanDF_test_pred' not found
+    Error: no more error handlers available (recursive errors?); invoking 'abort' restart
+    Browse[1]> head(cleanDF_test_pred)
+    Error during wrapup: object 'cleanDF_test_pred' not found
+    Error: no more error handlers available (recursive errors?); invoking 'abort' restart
+
+```{r}
+cf <- confusionMatrix(cleanDF_test_pred, test_labels[[1]], positive = NULL, dnn = c("Prediction", "True"))
+cf
+table <- as_tibble(cf$table)
+plot_confusion_matrix(table, target_col = "True", prediction_col = "Prediction", counts_col = "n")
+```
+
+Error:
+
+    Error during wrapup: object 'cleanDF_test_pred' not found
+    Error: no more error handlers available (recursive errors?); invoking 'abort' restart
+    Browse[1]> cf
+    Error during wrapup: object 'cf' not found
+    Error: no more error handlers available (recursive errors?); invoking 'abort' restart
+    Browse[1]> table <- as_tibble(cf$table)
+    Error during wrapup: object 'cf' not found
+    Error: no more error handlers available (recursive errors?); invoking 'abort' restart
+    Browse[1]> plot_confusion_matrix(table, target_col = "True", prediction_col = "Prediction", counts_col = "n")
