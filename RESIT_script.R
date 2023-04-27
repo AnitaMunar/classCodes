@@ -59,12 +59,12 @@ webshop_data <- anti_join(webshop_data, outliers_df)
 
 #create dummies
 webshop_data <- webshop_data %>%
-  mutate(Device_dummy = recode(Device, "Mobile" = 1, "PC" = 2),
-         Find_website_dummy = recode(Find_website, 
-                                     "Social_Media_Advertisement" = 1, 
-                                     "Search_Engine" = 2, 
-                                     "Friends_or_Family" = 3, 
-                                     "Other" = 4)) %>%
+  mutate(Device_dummy = case_when(Device == "Mobile" ~ 1,
+                                  Device == "PC" ~ 2),
+         Find_website_dummy = case_when(Find_website == "Social_Media_Advertisement" ~ 1,
+                                        Find_website == "Search_Engine" ~ 2,
+                                        Find_website == "Friends_or_Family" ~ 3,
+                                        Find_website == "Other" ~ 4)) %>%
   select(-Device, -Find_website)
 
 #part1c
@@ -96,6 +96,17 @@ ggplot(webshop_data, aes(x = Find_website_dummy, y = Purchase_Amount)) +
 ggplot(webshop_data, aes(x = Device_dummy, y = Purchase_Amount)) +
   geom_point() +
   geom_smooth(method = "lm", formula = y ~ poly(x, 2), se = FALSE)
+
+webshop_data <- webshop_data %>%
+  mutate(Age_squared = Age^2) %>%
+  select(-Age) %>%
+  rename(Age = Age_squared)
+
+# Plot the lowess curve
+ggplot(webshop_data, aes(x = Age, y = Purchase_Amount)) +
+  geom_point() +                  # scatter plot of the data
+  geom_smooth(method = "lowess")  # lowess curve
+
 
 #2a
 summary(lm(Purchase_Amount~Time_Products_Average,data=webshop_data))
