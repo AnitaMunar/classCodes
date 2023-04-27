@@ -26,7 +26,7 @@ webshop_data <- na.omit(webshop_data)
 #Cook's D remove outliers
 
 # Define predictor variables
-predictor_vars <- c("Age", "Shipping_Time", "Pictures", "Find_website", "Device", "Time_Spent_on_Website", "Number_of_products_browsed", "Ease_of_purchase")
+predictor_vars <- c("Age", "Shipping_Time", "Pictures", "Find_website", "Device", "Time_Spent_on_Website", "Number_of_products_browsed", "Ease_of_purchase", "Review_rating")
 
 # Initialize empty list to store outliers for each variable
 outliers_list <- vector("list", length(predictor_vars))
