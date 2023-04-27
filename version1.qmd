@@ -1,0 +1,688 @@
+---
+title: "FIML"
+format: html
+editor: visual
+---
+
+# Exam - Introduction to Modelling
+
+***by Anita Munar (1652126)***
+
+In this document, I present my code for the statistical model that is capable of predicting the amount customers will spend in a given webshop, after looking at their online behavior and personal characteristics.
+
+## Introduction
+
+First, I will load the libraries that I might need. Usually I load in all the libraries that might be useful for statistical modelling, in this case I left out the 'wordcloud' libraries, since the data I want to predict (spending amount) is integer, or possibly float, but not string or character data. The main objective here is that I load libraries such as 'caret', 'tidyverse' and 'dplyr' that are useful for executing basic statistical analysis.
+
+```{r}
+library(class)
+library(ggplot2)
+library(caret)
+library(lattice)
+library(tidyverse)
+library(tm)
+library(slam)
+library(e1071)
+library(ISLR)
+library(magrittr)
+library(naivebayes)
+library(dplyr)
+library(fastDummies)
+library(missForest)
+library(mice)
+library(car)
+library(stats)
+```
+
+Once I loaded the libraries, I will start loading in my csv data. I used my own public Github repository as a source to load in the csv file from.
+
+```{r}
+rawDF <- read_csv("https://raw.githubusercontent.com/HAN-M3DM-Data-Mining/data-mining-s2y2223-AnitaMunar/master/1652126webshop.csv")
+head(rawDF)
+str(rawDF)
+```
+
+First I load the data in and do initial inspections. After making sure that it is the correct dataset by checking the layout, I name it "webshop_data" for clarity and I am able to proceed to the tasks. At this unmodified state, the dataset has **1890** observations on 10 variables.
+
+```{r}
+webshop_data <- read_csv("https://raw.githubusercontent.com/HAN-M3DM-Data-Mining/data-mining-s2y2223-AnitaMunar/master/1652126webshop.csv")
+```
+
+Now for first inspections of the data: There are 2 columns with character data, and 8 columns consisting of 'dbl' data as for double, which is numeric data that holds values with decimal points and integers as well.
+
+1.  The first column, containing **Purchase_Amount**, is the [dependent variable]{.underline}.
+
+2.  The second column, **Time_Spent_on_Website**, an [integer]{.underline} data, is an independent variable that represents seconds.
+
+3.  **Number_of_products_browsed**: [Integer]{.underline} data on how many products were browsed through by the customer before their final payment.
+
+4.  **Pictures:** The average number of pictures on the pages of the products bought by the customer. [Float]{.underline} data, although pictures should be integer, but the point here was averaging, so we accept.
+
+5.  **Shipping_Time:** The average number of days of shipping. [Float]{.underline} data.
+
+6.  **Review_rating:** The average rating on products bought by given customer a scale of 1-5. [Float.]{.underline}
+
+7.  **Find_website:** [Character]{.underline} data, based on 4 c choices that represent 3 given ways of finding and "Other" for customers that thought the first 3 option didn't fit them.
+
+8.  **Ease of Purchase:** [Integer]{.underline} data on a scale of 1-5, where 1 represents worst and 5 the best rating from a customer survey.
+
+9.  **Age:** The age of the customer, [integer]{.underline} data.
+
+10. **Device:** [Character]{.underline} data, with 2 choices being "Mobile" and "PC".
+
+Now, lets get into the step-by-step breakdown of my tasks:
+
+## Part 1 - Preparing the data
+
+**a.** Remove rows with missing values
+
+```{r}
+webshop_data <- na.omit(webshop_data)
+```
+
+After running this code, I see now that webshop_data has only **1556** observations on 10 variables, and by scrolling through it I can make sure that rows with missing values were removed successfully.
+
+**b.**
+
+**Cook's D**
+
+Next, the code conducts Cook'sD to clean outliers.
+
+```{r}
+library(dplyr)
+
+# Define predictor variables
+predictor_vars <- c("Age", "Shipping_Time", "Pictures", "Find_website", "Device", "Time_Spent_on_Website", "Number_of_products_browsed", "Ease_of_purchase")
+
+# Initialize empty list to store outliers for each variable
+outliers_list <- vector("list", length(predictor_vars))
+names(outliers_list) <- predictor_vars
+
+# Loop through each predictor variable and compute Cook's distance
+for (var in predictor_vars) {
+  
+  # Create linear regression model
+  lm_model <- lm(webshop_data$Purchase_Amount ~ . - Purchase_Amount, data = webshop_data)
+  
+  # Compute Cook's distance for each observation
+  cooks_d <- cooks.distance(lm_model)
+  
+  # Identify outliers using Cook's distance threshold of 4/n
+  n <- nrow(webshop_data)
+  outliers <- cooks_d > 4/n
+  
+  # Store outliers for current variable in list
+  outliers_list[[var]] <- webshop_data[outliers, ]
+  
+  # Print results
+  cat(paste0("Outliers for ", var, ":\n"))
+  print(outliers_list[[var]])
+  cat("\n")
+}
+```
+
+Remove outliers
+
+```{r}
+outliers_df <- do.call(rbind, outliers_list)
+webshop_data <- anti_join(webshop_data, outliers_df)
+```
+
+This action decreased the number of observatios to **1460**.
+
+### **Dummies**
+
+We make dummy variables to represent categorical variables in a way that can be used in regression analysis. In a regression model, categorical variables cannot be included in their raw form, as they are not numerical. Instead, we create dummy variables that represent each category as a binary (0 or 1) variable. This allows us to include categorical variables in a regression model and examine their effect on the outcome variable.
+
+Following, the Device dummy and Find_website dummy is added, and the original columns are removed.
+
+```{r}
+webshop_data <- webshop_data %>%
+  mutate(Device_dummy = recode(Device, `Mobile` = 1, `PC` = 2),
+         Find_website_dummy = recode(Find_website, 
+                                     `Social_Media_Advertisement` = 1, 
+                                     `Search_Engine` = 2, 
+                                     `Friends_or_Family` = 3, 
+                                     `Other` = 4)) %>%
+  select(-Device, -Find_website)
+```
+
+I will come back to the use the dummies in the regression model at the end.
+
+**c.** Check if there is multicollinearity between the independent variables. Show how you checked this and, if it causes problems, explain how you dealt with this.
+
+```{r}
+cor_matrix <- cor(webshop_data[, c("Time_Spent_on_Website", "Number_of_products_browsed","Review_rating", "Ease_of_purchase", "Find_website_dummy", "Pictures", "Device_dummy")])
+print(cor_matrix)
+```
+
+From this matrix I see that other than the perfect correlations between variables that are the same variable, being the value of 1, but I will ignore this.
+
+On the dimension of Time_Spent_on_Website:
+
+    Number_of_products_browsed           0.976256859
+
+This means a high correlation, but it is for obvious reasons: the more the customer spends on the website, the more products they are likely to browse. To reduce this multicollinearity is cruical for the model to achieve an optimal outcome.
+
+```{r}
+webshop_data$Time_Products_Average <- (webshop_data$Time_Spent_on_Website/60 + webshop_data$Number_of_products_browsed)/2
+
+```
+
+This code divides the Time_Spent_on_Website variable by 60 to convert the time from seconds to minutes, and then averages it with Number_of_products_browsed. The resulting variable represents the average time spent on the website per product browsed, in minutes.
+
+There are 1477 observations on **11** variables currently in the dataset.
+
+```{r}
+webshop_data$Time_Spent_on_Website <- NULL
+webshop_data$Number_of_products_browsed <- NULL
+```
+
+After this command that removes the original two columns if time and products browsed, there are 1477 observations on **9** variables.
+
+**d.** Check if there are non-linear relationships between the independent variables and the dependent variables. If there are, make the appropriate transformations. Show and explain how you found out and how you know the transformation makes the model better.
+
+```{r}
+# Scatter plot of Age vs. Purchase_Amount
+plot(webshop_data$Age, webshop_data$Purchase_Amount)
+
+# Scatter plot of Shipping_Time vs. Purchase_Amount
+plot(webshop_data$Shipping_Time, webshop_data$Purchase_Amount)
+
+# Scatter plot of Pictures vs. Purchase_Amount
+plot(webshop_data$Pictures, webshop_data$Purchase_Amount)
+```
+
+The relationships of Shipping time and Pictures on the dimension of Purchase_Amount seem linear, but I can see a singificant non-linear relationship between Age and Purchase_Amount.
+
+![](images/image-407692895.png)
+
+```{r}
+ggplot(webshop_data, aes(x = Find_website_dummy, y = Purchase_Amount)) +
+  geom_point() +
+  geom_smooth(method = "loess", se = FALSE) +
+  labs(x = "Find Website Dummy", y = "Purchase Amount")
+```
+
+```{r}
+ggplot(webshop_data, aes(x = Device_dummy, y = Purchase_Amount)) +
+  geom_point() +
+  geom_smooth(method = "lm", formula = y ~ poly(x, 2), se = FALSE)
+```
+
+There seem to be no significant non-linear relationship in case of the two dummy variables.
+
+### Part 2 - create the model
+
+**a.** After the steps in part 1 are done, present the model in a table APA style. For each independent variable in the model, clearly explain what the output means in the context of the web shop.
+
+Here I decided to not set my data into test and train data, since for simple linear regression models with one predictor it is also correct to use the whole dataset. I will evaluate on the performance of the model later.
+
+```{r}
+summary(lm(Purchase_Amount~Time_Products_Average,data=webshop_data))
+```
+
+    Multiple R-squared:  0.5862,    Adjusted R-squared:  0.5859 
+
+This is an R2 regression of 0.58, which is a quite good correlation. It hints that the purchased value is correlated with theaverage time spent on the website per product browsed, in minutes.
+
+    Time_Products_Average  12.4034
+
+Also, when 1 more product is being looked at per minute, the Purchase Amount may increase by 12 euro.
+
+```{r}
+summary(lm(Purchase_Amount~Pictures,data=webshop_data))
+```
+
+From the Coefficient - Estimate, we see that if a customer checked out 1 more picture of the product, the purchase amount would be increased by 2 euro. This signs a rather low correlation. The R squared values are also showing that this is not the close correlation we are looking for when looking for purchase values later. Therefore, the Picture variable is not as useful for influencing the purchase value outcome.
+
+```{r}
+summary(lm(Purchase_Amount~Shipping_Time,data=webshop_data))
+```
+
+We can see from these outcomes (coefficient estimate, R2 being 0.78, p-value being 0.77) that the Shipping time is not be the variable that will get us closer to a meaningful correlation.
+
+```{r}
+summary(lm(Purchase_Amount~Review_rating,data=webshop_data))
+```
+
+From this we can see that there is small correlation between the Review rating and the Purchase amount. The R2 is around 0.02, which is very low. From the Estimate we can conclude that if the Review rating goes up by 1, the Purchase value would go up by 35 euro. Even though this shows that a higher rating will result in more income for the webshop, due to the low R2, we can not determine close and meaningful correlation in this variable and the independent variable.
+
+```{r}
+summary(lm(Purchase_Amount~Ease_of_purchase,data=webshop_data))
+```
+
+Same as earlier with the Shipping time. The R2 is very low. The Estimate is 0.6, meaning that if an Ease of purchase rating goes up by 1, the Purchase amount increases by 0.6 euro. This is too low to be considered significant. Same with p-value, 0.88.
+
+```{r}
+summary(lm(Purchase_Amount~Age,data=webshop_data))
+```
+
+Here we can not determine close correlation either. The R2 is 0.01 and the Estimate is -1.1. The estimate being negative could sign for an inverse correlation - meaning that the younger the customer, the more they might spend. Although the amount is only around 1 euros, so it is not significant. I keep it in mind that the Age variable is non-linear, therefore later on I will run a different model on this variable.
+
+Next, we check which one of the dummies has an effect on the Purchase_Amount.
+
+```{r}
+summary(lm(Purchase_Amount~Device_dummy,data=webshop_data))
+```
+
+The Estimate coefficient, the R2 and the p-value for Device:
+
+    Device_dummy    5.335 
+
+    Multiple R-squared:  0.0006006
+
+    p-value: 0.3466
+
+From these values we can tell that the Device type does not have a high significant effect on the Purchase Amount, there is only a 5 euro difference between using PC or using Mobile.
+
+```{r}
+summary(lm(Purchase_Amount~Find_website_dummy,data=webshop_data))
+```
+
+    Find_website_dummy   -1.732
+
+    Multiple R-squared:  0.0001335
+
+    p-value: 0.6572
+
+We can also determine that the different routes from which the customers found the website did not have a statistically significant effect on the Purchase Amount.
+
+### **Takeaways from simple regression**
+
+To sum up the results of simple regressions, we see that the most significant variables are
+
+-Time_Products_Average\
+-Review_rating\
+-possibly Device_dummy
+
+Now, lets look at the multiple regression!
+
+*Multiple regression with all off the independent variables:*
+
+```{r}
+model_a <- lm(Purchase_Amount ~ Time_Products_Average+Review_rating+Ease_of_purchase+Pictures+Find_website_dummy+Shipping_Time+Device_dummy, data = webshop_data)
+summary(model_a)
+```
+
+    Multiple R-squared:  0.6036,    Adjusted R-squared:  0.6017  
+
+Model_a shows the regression for each linear independent variable before standardizing. The on-linear variable, Age, will be reflected on in a different model.\
+\
+An R-squared value of 0.6 indicates that 60% of the variation in the dependent variable (Purchase_Amount) can be explained by the independent variables (Time_Products_Average, Review_rating, Ease_of_purchase, Pictures, Find_website_dummy, Shipping_Time, Device_dummy) in the model. In other words, the model explains a moderate amount of the variability in the data.
+
+In this layout I also see slightly different outcomes for the Coefficients Estimate aspect.
+
+    Time_Products_Average  12.4797
+
+This confirms our earlier suspicion that the products looked at per minute has a high correlation with the Purchase_Amount. What I also see better with this form of regression is that the Review_rating is more correlated with the Purchase_Amount.
+
+    Review_rating          36.3016
+
+This confirms our previous finding that the Review rating has a very high correlation with the Purchase amount: if the rating goes up by 1, the purchased amount goes up by 35 euro.
+
+    Ease_of_purchase        5.9879
+
+Also, the Ease of purchase rating shows that if the ease is perceived 1 score higher, the purchase amount goes up by 6 euro.
+
+    Device_dummy            4.6674
+
+Similarly for the type of Device, the multiple regression shows a higher significance on the Purchase Amount. Meaning that people shopping from their PC increases the estimated purchase amount by 4 euro on average.
+
+    Find_website_dummy     -4.5714
+
+Lastly, the Find_website dummy, showing a stronger influence than in individual regression earlier. The order in which I wrote the code is the following:\
+"Social_Media_Advertisement" = 1,\
+"Search_Engine" = 2,\
+"Friends_or_Family" = 3,\
+"Other" = 4))\
+Meaning, that the change between ways of reaching the website could have an effect on the purchase. If the rank increased by 1, there is a chance that the person spends 3 euro less. Therefore, customers approaching the website from social media and search engine generate slightly higher revenue than those who find it through friend and family or other methods.
+
+These outcomes put the individual simple regressions into a different light.
+
+### **Takeaways from multiple regression**
+
+-Review_rating\
+-Time_Products_Average\
+-Ease_of_purchase\
+-Device\
+-Find_website
+
+These 5 variables have been found to have an effect on the Purchase_Amount outcomes. Therefore, I will proceed with this information in mind.
+
+    Shipping_Time          -0.7395
+
+    Pictures               -1.5540
+
+These variables have a weak relationship with the target variable Purchase_Amount. However, it is still useful to keep them in the model because they might have some predictive value when used in combination with other variables. I tried deleting them, but it does not make the model more accurate.
+
+Also, I will not delete the "Age" variable, since I seen earlier that there is a non-linear relationship between Age and Purchase_Amount. I will get back to this soon. This last code successfully removed the variables that I deemed no longer significant.\
+My dataset currently consists of 1477 observations on **7** variables.
+
+**b**.Create a model in which the appropriate variables are standardized and present the results next to the model of part 2a. Note that standardization does not work for non-linear effects. Based on this model, which of the standardized variables has the largest effect on how the customers spend on average?
+
+After I cleaned the data, we can start preparing to test regressions and build a new standardized model. I will add the variables: "Time_Products_Average", "Review_rating" and "Ease_of_purchase", because I seen from the model that these have a higher significance on the the purchase amount. I left out the dummies, because scaling them may not be necessary as they are already in a binary form and may affect their interpretation. Coefficients of these variables will be interpreted as the effect of a one-standard-deviation increase in device or finding website route, which does not make sense. Therefore, I will keep the dummies separate from the continous variables.
+
+```{r}
+scaled_data <- webshop_data
+scaled_data[, c("Time_Products_Average", "Review_rating", "Ease_of_purchase")] <- scale(scaled_data[, c("Time_Products_Average", "Review_rating", "Ease_of_purchase")])
+model_b <- lm(Purchase_Amount ~ Time_Products_Average+Review_rating+Ease_of_purchase+Find_website_dummy+Device_dummy, data = scaled_data)
+summary(model_b)
+```
+
+We can see that scaling the data did not improve the R2 value by any amount.
+
+    Multiple R-squared:  0.6035,    Adjusted R-squared:  0.6019
+
+The R-squared value of 0.6033 indicates that approximately 60.33% of the variability in the purchase amount can be explained by the variables included in the model.
+
+    Coefficients:
+                          Estimate   Std.Error  t value
+    Time_Products_Average   74.375      1.612  46.135
+
+The variable with the largest absolute t-value has the largest effect on the response variable. This is the Time_Products_Average.
+
+```{r}
+# Compare the models
+summary(model_a)
+summary(model_b)
+```
+
+    > summary(model_a)
+
+    Coefficients:
+                          Estimate Std. Error t value Pr(>|t|)    
+    (Intercept)           221.0071    20.8700  10.590   <2e-16 ***
+    Time_Products_Average  12.4797     0.2706  46.120   <2e-16 ***
+    Review_rating          36.3016     3.4046  10.663   <2e-16 ***
+    Ease_of_purchase        5.9879     2.8162   2.126   0.0336 *  
+    Pictures               -1.5540     1.7459  -0.890   0.3736    
+    Find_website_dummy     -4.5714     2.4637  -1.855   0.0637 .  
+    Shipping_Time          -0.7446     1.6946  -0.439   0.6604    
+    Device_dummy            4.6674     3.5814   1.303   0.1927    
+    ---
+    Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+    Residual standard error: 61.82 on 1469 degrees of freedom
+    Multiple R-squared:  0.6036,    Adjusted R-squared:  0.6017 
+    F-statistic: 319.5 on 7 and 1469 DF,  p-value: < 2.2e-16
+
+    > summary(model_b)
+
+    Coefficients:
+                          Estimate Std. Error t value Pr(>|t|)    
+    (Intercept)            596.837      7.763  76.885   <2e-16 ***
+    Time_Products_Average   74.318      1.611  46.140   <2e-16 ***
+    Review_rating           17.149      1.609  10.657   <2e-16 ***
+    Ease_of_purchase         3.466      1.611   2.151   0.0316 *  
+    Find_website_dummy      -4.612      2.462  -1.873   0.0613 .  
+    Device_dummy             4.634      3.578   1.295   0.1955    
+    ---
+    Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+    Residual standard error: 61.8 on 1471 degrees of freedom
+    Multiple R-squared:  0.6033,    Adjusted R-squared:  0.602 
+    F-statistic: 447.4 on 5 and 1471 DF,  p-value: < 2.2e-1
+
+Looking at the summary output of the two models, we can see that they both have the same significant predictors: Time_Products_Average, Review_rating, Ease_of_purchase, Find_website_dummy, and Device_dummy. However, model_b does not include the predictor Pictures.
+
+The adjusted R-squared value for model_a is 0.6017 and for model_b it is 0.602, indicating that both models explain approximately 60% of the variation in the response variable. The F-statistic is also higher for model_b than for model_a, indicating a better fit.
+
+Although model_b has a higher R-squared and F-statistic, it has fewer predictors than model_a.
+
+In order to separately deal with Age variable that was found to have a non-linear relationship with Purchase_Amount:
+
+```{r}
+model_age <- lm(Purchase_Amount ~ Age + I(Age^2), data = webshop_data)
+summary(model_age)
+```
+
+This model includes both the linear effect of age and the quadratic effect of age on purchase amount.\
+
+**c.** Use the model to make a prediction about a new customer that is not in the data. Keep in mind the principle of parsimony when making the prediction. Also explain how you know that this model is suitable for making a prediction. The customer has the following characteristics:
+
+Time_Products_Average = 12.05 Pictures = 3.4 Shipping_Time = 2.6 Review_rating = 4.5 Find_website_dummy = 3 Ease_of_purchase = 4 Age = 35 Device_dummy = 2
+
+Remark:
+
+> | Time spent on website   723 seconds
+> | Total number of products browsed    20 products
+
+I remembered that I changed the above while normalizing, so I will input the following:
+
+Time_Products_Average = (723/60 + 20)/2 = 12.05
+
+```{r}
+# Fit the linear regression model
+model_c <- lm(Purchase_Amount ~ Time_Products_Average + Review_rating + Ease_of_purchase, data = webshop_data)
+summary(model_c)
+```
+
+Based on the summary of the model_c, we can judge variables we want to include in our prediction.
+
+I decided to keep the following variables after concluding that the dummies confuse the model and the shipping time plus the pictres do not have a high signficance: Time_Products_Average, Review_rating, Ease_of_purchase.
+
+Now, I can make a prediction about a new customer's purchase amount using the predict function in R:
+
+```{r}
+new_customer <- data.frame(Time_Products_Average = 12.05, Review_rating = 4.5, Ease_of_purchase = 4)
+
+predicted_purchase_amount <- predict(model_c, newdata = new_customer)
+print(predicted_purchase_amount)
+```
+
+Based on the most statistically significant variables, the new customer will be likely to spend around 551 euro in the webshop, based on their characteristics and behavior.\
+To evaluate whether this prediction is correct, we would need to compare it to the actual purchase amount that the new customer makes. However, since the new customer data was not included in the training or test sets, we do not have access to their actual purchase amount to make this comparison.
+
+One way to assess the accuracy of the model's predictions is to use cross-validation or hold-out testing techniques to estimate the model's performance on new data. If the model performs well on new data, it suggests that the model is generalizable and likely to make accurate predictions on new customers.
+
+```{r}
+# calculate the mean squared error (MSE) of the model using cross-validation
+mse <- train(Purchase_Amount ~ Time_Products_Average + Review_rating + Ease_of_purchase, data = webshop_data, method = "lm", trControl = trainControl("cv", 10), metric = "RMSE")
+
+# print the mean squared error
+print(mse)
+```
+
+The cross-validation results show that the model has an RMSE (Root Mean Squared Error) of 61.78, which indicates that on average, the model's predictions are off by \$61.78.\
+The R-squared value is 0.60, which indicates that the model explains 60% of the variation in the target variable.\
+The MAE (Mean Absolute Error) is 46.05, which is the average absolute difference between the predicted and actual purchase amount. Overall, the model seems to perform reasonably well, but it may not be perfect.\
+\
+The predicted value was 551 euro, and based on cross-validation, the new customer is expected to spend around 490-610 euro in the webshop.
+
+```{r}
+# extract the residuals from the model
+residuals <- resid(model_c)
+
+# create a normal probability plot of the residuals
+qqnorm(residuals)
+qqline(residuals)
+
+print(residuals)
+```
+
+The qqnorm() function creates the normal probability plot, and the qqline() function adds a reference line to help evaluate how closely the residuals (difference between the actual and predicted values) follow a normal distribution.
+
+The residuals are normally distributed, since I see that they follow the reference line. If they were to deviate significantly from the reference line, it would indicate a violation of the normality assumption of linear regression.
+
+Another type of prediction, using the model_age from earlier:
+
+```{r}
+new_customer_age <- data.frame(Age = 35)
+new_customer_age$Age_sq <- new_customer_age$Age^2
+predicted_purchase_amount_age <- predict(model_age, newdata = new_customer_age)
+print(predicted_purchase_amount_age)
+```
+
+Based on the age of the new customer, an amount around 600 euro can be expected as purchase value. This is close to the earlier predicted value as well.
+
+**d.** Finally, repeat steps 1b (dummy variables, outlier deletion), 1c (check for multicollinearity), and 1d (Check if there are non-linear relationships between the independent variables and the dependent variable), so that this time the missing values are still included. Then take the appropriate steps to impute the missing values.\
+Describe whether there are differences between the imputed vs non-imputed models and whether imputation is an appropriate solution in this case.
+
+To repeat the steps with missing values included using the original rawDF dataset:
+
+```{r}
+# Make a copy of the rawDF dataset
+#part2da
+webshop_missing_data <- rawDF
+#remove negative values
+webshop_missing_data <- webshop_missing_data %>%
+  filter(Time_Spent_on_Website >= 0 & Number_of_products_browsed >= 0)
+```
+
+```{r}
+boxplot(webshop_missing_data[,c(2,3,4,5,6,8,9)])
+```
+
+Here, I noticed that if I remove the outliers other than the negative values, or try to average time spent and products browsed, it deletes too many rows with NA values, to the point that only those NA values are left that completely do not have any values within the whole row. this is not nice because I will want to predict missing values for people who only have one cell missing in a row for example.
+
+```{r}
+webshop_missing_data <- webshop_missing_data %>%
+  mutate(Find_website_dummy_2 = if_else(is.na(Find_website), NA_integer_, 
+                                        recode(Find_website, 
+                                               `Social_Media_Advertisement` = 1, 
+                                               `Search_Engine` = 2, 
+                                               `Friends_or_Family` = 3, 
+                                               `Other` = 4))) %>%
+  select(-Find_website)
+```
+
+Above I use the if_else() function from dplyr to create the dummy variable, while preserving the missing values. In this case, we use (is.na(Find_website) as the logical vector, which is TRUE for missing values and FALSE for non-missing values. If the value is missing, we keep it as NA_integer\_, otherwise I use the recode() function to convert the original values to the dummy variable values.
+
+```{r}
+# Create a copy of the original dataset
+webshop_imputed <- webshop_missing_data
+
+# Set seed for reproducibility
+set.seed(123)
+
+# Perform regression imputation
+webshop_imputed <- mice(webshop_imputed, m=5, method="norm.predict", seed=123)
+
+# Extract the imputed data
+webshop_imputed <- complete(webshop_imputed)
+```
+
+This imputation causes the dummy variable to leave the given dimensions of integers and become a float value. This might make it harder to interpret.
+
+```{r}
+# Scatter plot of Age vs. Purchase_Amount
+plot(webshop_imputed$Age, webshop_missing_data$Purchase_Amount)
+
+# Scatter plot of Shipping_Time vs. Purchase_Amount
+plot(webshop_imputed$Shipping_Time, webshop_missing_data$Purchase_Amount)
+
+# Scatter plot of Pictures vs. Purchase_Amount
+plot(webshop_imputed$Pictures, webshop_missing_data$Purchase_Amount)
+```
+
+```{r}
+#make average of the 2 correlating columns
+webshop_imputed$Time_Products_Average <- (webshop_imputed$Time_Spent_on_Website/60 + webshop_imputed$Number_of_products_browsed)/2
+
+webshop_imputed$Time_Spent_on_Website <- NULL
+webshop_imputed$Number_of_products_browsed <- NULL
+```
+
+```{r}
+ggplot(webshop_imputed, aes(x = Find_website_dummy_2, y = Purchase_Amount)) +
+  geom_point() +
+  geom_smooth(method = "loess", se = FALSE) +
+  labs(x = "Find Website Dummy", y = "Purchase Amount")
+```
+
+Above we see that the plot looks less organized than earlier.
+
+```{r}
+ggplot(webshop_imputed, aes(x = Device, y = Purchase_Amount)) +
+  geom_point() +
+  geom_smooth(method = "loess", se = FALSE) +
+  labs(x = "Device", y = "Purchase Amount")
+```
+
+\
+Now, lets run the regressions again!
+
+```{r}
+summary(lm(Purchase_Amount~Time_Products_Average,data=webshop_imputed))
+summary(lm(Purchase_Amount~Pictures,data=webshop_imputed))
+summary(lm(Purchase_Amount~Shipping_Time,data=webshop_imputed))
+summary(lm(Purchase_Amount~Review_rating,data=webshop_imputed))
+summary(lm(Purchase_Amount~Ease_of_purchase,data=webshop_imputed))
+summary(lm(Purchase_Amount~Age,data=webshop_imputed))
+summary(lm(Purchase_Amount~Device,data=webshop_imputed))
+summary(lm(Purchase_Amount~Find_website_dummy_2,data=webshop_imputed))
+```
+
+```{r}
+model_d <- lm(Purchase_Amount ~ Time_Products_Average+Review_rating+Ease_of_purchase+Pictures+Find_website_dummy_2+Shipping_Time+Device, data = webshop_imputed)
+summary(model_d)
+```
+
+```{r}
+scaled_data2 <- webshop_imputed
+scaled_data2[, c("Time_Products_Average", "Review_rating", "Ease_of_purchase")] <- scale(scaled_data2[, c("Time_Products_Average", "Review_rating", "Ease_of_purchase")])
+```
+
+```{r}
+model_e <- lm(Purchase_Amount ~ Time_Products_Average+Review_rating+Ease_of_purchase+Find_website_dummy_2+Device, data = scaled_data2)
+summary(model_e)
+```
+
+```{r}
+# Compare the models
+summary(model_c)
+summary(model_d)
+summary(model_e)
+
+```
+
+### **Model C:**
+
+    Multiple R-squared:  0.6019,    Adjusted R-squared:  0.6011
+
+All predictor variables have statistically significant coefficients, as indicated by the p-values less than 0.05. The R-squared value of 0.6019 indicates that the model explains approximately 60.2% of the variance in the response variable, Purchase_Amount.
+
+### **Model D:**
+
+    Multiple R-squared:  0.5579,    Adjusted R-squared:  0.5563 
+
+Again, all predictor variables have statistically significant coefficients except for Pictures and Shipping_Time, as indicated by their p-values greater than 0.05.\
+\
+The R-squared value of 0.5579 indicates that this model explains approximately 55.8% of the variance in the response variable. This is less than in model_c.
+
+### **Model E:**
+
+    Multiple R-squared:  0.5575,    Adjusted R-squared:  0.5563
+
+For the third model (model_e), a subset of the predictor variables from model_d is used: Time_Products_Average, Review_rating, Ease_of_purchase, Find_website_dummy_2, and Device. All predictor variables have statistically significant coefficients except for Find_website_dummy_2, as indicated by its p-value greater than 0.05. The R-squared value of 0.5575 indicates that this model explains approximately 55.8% of the variance in the response variable.
+
+## Reflection
+
+There are several ways to impute missing data, including:
+
+1.  Mean or median imputation: Replace missing values with the mean or median of the observed data for that variable.
+
+2.  Last observation carried forward (LOCF): Use the last observed value of a variable to fill in any missing values that follow it in time.
+
+3.  Multiple imputation: Generate multiple sets of plausible values for missing data based on statistical models of the observed data, and combine the results to obtain a single imputed dataset.
+
+4.  Regression imputation: Predict missing values for a variable using other variables in the dataset that are related to it through a regression model.
+
+5.  K-nearest neighbor (KNN) imputation: Use the values of the k-nearest observations in the dataset to predict the missing value for a variable.
+
+6.  Expectation-Maximization (EM) algorithm: Estimate the parameters of a statistical model that includes missing data using an iterative algorithm that alternates between imputing the missing values and updating the model parameters.
+
+Each method has strengths and weaknesses, and it is important to carefully evaluate the limitations of each method before choosing.
+
+Personally, I used multiple imputations. It uses the MICE (Multivariate Imputation by Chained Equations) package in R to impute missing values by modeling each variable with missing data as a function of the other variables in the dataset. In this code, a copy of the original dataset with missing data is created, then MICE is used to perform imputation on this copy using the "norm.predict" method, which uses regression to impute missing values. The "m=5" argument specifies that five imputed datasets should be created, and the "seed=123" argument sets a seed for reproducibility. Finally, the "complete" function is used to extract the imputed data from the MICE object.
+
+## Conclusion
+
+To conclude the last part, after imputing the missing values, the model did not become better unfortunately. This shows that it is quite hard to choose a stable method.
+
+Overall, the webshop managers should look more closely at the Time_Products_Average, Review_rating and Ease_of_purchase variables, since the model using only those attributes produced the most accurate outcome.
+
+It is advised for the managers to make sure that the webshop is appealing, inviting and does motivate the customer to send more time on it. Also, it is advised to look into high ratings on review of product and in ease of purchase, since the people with higher scores on those dimensions ended up spending higher amounts on the website.
+
+Finding out why these things happen can help the company generate more revenue, and eventually more profit.
